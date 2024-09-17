@@ -1,116 +1,79 @@
+from datasets import load_dataset
 import torch
-from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import pad_sequence
-import torchtext
-
-torchtext.disable_torchtext_deprecation_warning()
-
-from torchtext.data.utils import get_tokenizer
-from torchtext.vocab import build_vocab_from_iterator
-from torchtext.datasets import IMDB
-
-try:
-    from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE
-except ImportError:
-    DILL_AVAILABLE = False
-
-# Define tokenizer
-tokenizer = get_tokenizer('spacy', language='en_core_web_sm')
+from torch.utils.data import DataLoader, Dataset, random_split
+from data_loaders.base_data_module import BaseDataModule
 
 
-# Define a function to yield tokens from the dataset
-def yield_tokens(data_iter):
-    for _, text in data_iter:
-        yield tokenizer(text)
+class IMDBDataset(Dataset):
+    def __init__(self, dataset):
+        self.dataset = dataset
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        return item['text'], item['label']
 
 
-# Load your dataset
-train_iter, test_iter = IMDB(split=('train', 'test'))
+class IMDBDataModule(BaseDataModule):
+    def __init__(self, classification_word="Sentiment", val_split=0.1):
+        self.classification_word = classification_word
+        self.val_split = val_split
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
+        self.tokenizer = None
+        self.load_data()
 
-# Build the vocabulary from the training dataset
-vocab = build_vocab_from_iterator(yield_tokens(train_iter), specials=["<unk>", "<pad>"])
-vocab.set_default_index(vocab["<unk>"])
+    def load_data(self):
+        dataset = load_dataset("imdb")
+        self.test_dataset = IMDBDataset(dataset['test'])
 
+        train_val = dataset['train']
+        val_size = int(len(train_val) * self.val_split)
+        train_size = len(train_val) - val_size
+        train_subset, val_subset = random_split(train_val, [train_size, val_size])
+        self.train_dataset = IMDBDataset(train_subset)
+        self.val_dataset = IMDBDataset(val_subset)
 
-# Print unique labels for debugging
-def print_unique_labels(data, description_string):
-    labels = [label for label, _ in data]
-    unique_labels = set(labels)
-    print(f"Unique labels in the {description_string} data: {unique_labels}")
+    def setup(self, tokenizer):
+        self.tokenizer = tokenizer
 
+    def collate_fn(self, batch):
+        texts, labels = zip(*batch)
+        encodings = self.tokenizer(list(texts), truncation=True, padding=True, return_tensors="pt")
+        return encodings['input_ids'], encodings['attention_mask'], torch.tensor(labels)
 
-# Print unique labels in train and test datasets
-print_unique_labels(train_iter, "train")
-print_unique_labels(test_iter, "test")
+    def get_dataloader(self, dataset, batch_size, shuffle=False):
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            collate_fn=self.collate_fn
+        )
 
+    def get_train_dataloader(self, batch_size):
+        return self.get_dataloader(self.train_dataset, batch_size, shuffle=True)
 
-# Function to convert text to tensor
-def text_pipeline(x, vocab):
-    return vocab(tokenizer(x))
+    def get_val_dataloader(self, batch_size):
+        return self.get_dataloader(self.val_dataset, batch_size)
 
+    def get_test_dataloader(self, batch_size):
+        return self.get_dataloader(self.test_dataset, batch_size)
 
-# Function to convert label to tensor
-def label_pipeline(x):
-    # return 1 if x == 'pos' else 0
-    return 1 if x == 2 else 0  # Convert to binary classes: 1 for label 2, 0 for label 1
+    def get_full_train_dataloader(self, batch_size):
+        full_train = torch.utils.data.ConcatDataset([self.train_dataset, self.val_dataset])
+        return self.get_dataloader(full_train, batch_size, shuffle=True)
 
+    def get_dataloaders(self, tokenizer, batch_size):
+        self.setup(tokenizer)
+        return self.get_train_dataloader(batch_size), self.get_val_dataloader(batch_size)
 
-# Collate function for DataLoader
-def collate_batch(batch, vocab=vocab):
-    label_list, text_list, lengths = [], [], []
-    for (_label, _text) in batch:
-        label_list.append(label_pipeline(_label))
-        processed_text = torch.tensor(text_pipeline(_text, vocab), dtype=torch.int64)
-        text_list.append(processed_text)
-        lengths.append(len(processed_text))
-    # Pad sequences
-    text_list = pad_sequence(text_list, batch_first=True, padding_value=vocab["<pad>"])
-    label_list = torch.tensor(label_list, dtype=torch.float32)
-    lengths = torch.tensor(lengths, dtype=torch.int64)
-    return text_list, label_list, lengths
+    def preprocess(self):
+        train_data = [(item['text'], item['label']) for item in self.train_dataset.dataset]
+        val_data = [(item['text'], item['label']) for item in self.val_dataset.dataset]
+        return train_data + val_data
 
-
-# Function to load IMDB reviews dataset
-def load_dataloaders(batch_size=64, num_training_samples=2500):
-    half_sample_size = num_training_samples//2
-    # Convert iterators to lists for DataLoader
-    # train_data = list(train_iter)[:half_sample_size] + list(train_iter)[-half_sample_size:]
-    train_data = list(train_iter)
-    test_data = list(test_iter)
-
-    # Create DataLoader
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=collate_batch)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, collate_fn=collate_batch)
-
-    return train_loader, test_loader
-
-
-# Function to load IMDB reviews dataset with text strings for perturbation
-def load_dataloaders_with_text(batch_size=64, num_training_samples=2500):
-    half_sample_size = num_training_samples // 2
-    # Convert iterators to lists for DataLoader
-    # train_data = list(train_iter)[:half_sample_size] + list(train_iter)[-half_sample_size:]
-    train_data = list(train_iter)
-    # test_data = list(test_iter)[:500] + list(test_iter)[-500:]
-    test_data = list(test_iter)
-
-    # Create DataLoader with text strings
-    def collate_text_batch(batch):
-        label_list, text_list = [], []
-        for (_label, _text) in batch:
-            label_list.append(label_pipeline(_label))
-            text_list.append(_text)
-        label_list = torch.tensor(label_list, dtype=torch.float32)
-
-        # # Check unique classes in labels
-        # unique_classes = torch.unique(label_list)
-        # print("unique_classes=", unique_classes)
-        # if len(unique_classes) <= 1:
-        #     raise ValueError(f"The number of classes has to be greater than one; got {len(unique_classes)} class(es)")
-
-        return text_list, label_list
-
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, collate_fn=collate_text_batch)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, collate_fn=collate_text_batch)
-
-    return train_loader, test_loader
+    def get_class_names(self):
+        return ["negative", "positive"]

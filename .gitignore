@@ -1,6 +1,9 @@
 ### Example user template template
 ### Example user template
 
+trained_models/*
+logs/*
+
 outputs/gao_unmasked.csv
 outputs/zampieri_masked.csv
 outputs/zampieri_unmasked.csv
