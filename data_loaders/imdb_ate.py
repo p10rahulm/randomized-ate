@@ -2,11 +2,19 @@ import torch
 from torch.utils.data import DataLoader
 from data_loaders.imdb import IMDBDataModule
 import random
+import numpy as np
 from tqdm import tqdm
 from data_loaders.simple_dataloader import SimpleDataset
+import spacy
+import string
+from utilities.word_utils import load_spacy_model
+import os
+import pickle
+from utilities.word_utils import extract_phrases, remove_punctuation_phrases
+
 
 class ATEDataModule(IMDBDataModule):
-    def __init__(self, classification_word, model, perturbation_rate=0.5, num_perturbations=25, n_gram_length=5, change_threshold=0.5):
+    def __init__(self, classification_word, model, perturbation_rate=0.5, num_perturbations=50, n_gram_length=5, change_threshold=0.5):
         super().__init__(classification_word)
         self.model = model
         self.perturbation_rate = perturbation_rate
@@ -15,93 +23,134 @@ class ATEDataModule(IMDBDataModule):
         self.change_threshold = change_threshold
         self.ate_train_data = None
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.tokenizer = model.tokenizer
+        self.nlp = load_spacy_model("en_core_web_sm")
+        self.vocab = list(self.tokenizer.get_vocab().keys())
 
-    def prepare_data(self):
-        super().prepare_data()
-        self._prepare_ate_data()
+    
+    def perturb_text(self, text):
+        phrases = remove_punctuation_phrases(extract_phrases(text))
+        total_phrases = len(phrases)
+        
+        # Group phrases into sets of n_gram_length
+        grouped_phrases = [' '.join(phrases[i:i+self.n_gram_length]) for i in range(0, total_phrases, self.n_gram_length)]
+        
+        # Create multiple copies
+        phrases_n_copies = [grouped_phrases.copy() for _ in range(self.num_perturbations)]
+        
+        # Calculate number of phrases to perturb
+        num_to_perturb = min(int(len(grouped_phrases)), max(3, int(len(grouped_phrases) * self.perturbation_rate)))
+        
+        # Generate noise tokens
+        noise_tokens = np.random.choice(self.vocab, size=(self.num_perturbations, num_to_perturb))
+        
+        # Create perturbation masks
+        masks = np.zeros((self.num_perturbations, len(grouped_phrases)), dtype=bool)
+        for mask in masks:
+            mask[np.random.choice(len(grouped_phrases), num_to_perturb, replace=False)] = True
+        
+        perturbed_versions = []
+        for phrases_copy, noise, mask in zip(phrases_n_copies, noise_tokens, masks):
+            perturbed_part = ' '.join(np.array(phrases_copy)[mask])
+            phrases_copy = np.array(phrases_copy)
+            phrases_copy[mask] = noise
+            perturbed_text = ' '.join(phrases_copy)
+            perturbed_versions.append((perturbed_text, perturbed_part))
+        
+        return perturbed_versions
 
-    def _perturb_batch(self, batch, vocab):
-        original_inputs, original_labels = batch
-        perturbed_data = []
+    def prepare_data(self, batch_size=32):
+        super().load_data()  # Load the IMDB data
+        self._prepare_ate_data(batch_size=batch_size)
 
-        for original_input, original_label in zip(original_inputs, original_labels):
-            tokens = original_input.split()
-            total_tokens = len(tokens)
-            num_to_perturb = max(3, int(total_tokens * self.perturbation_rate))
-            num_ngrams = num_to_perturb // self.n_gram_length + 1
+    def _generate_perturbations(self):
+        print("Generating perturbations...")
+        train_data = self.preprocess()
+        
+        all_perturbations = []
+        for text, label in tqdm(train_data, desc="Generating perturbations"):
+            perturbed_versions = self.perturb_text(text)
+            all_perturbations.extend([(text, perturbed, perturbed_part, label) 
+                                      for perturbed, perturbed_part in perturbed_versions])
+        
+        print(f"Total perturbations generated: {len(all_perturbations)}")
+        return all_perturbations
 
-            batch_perturbed = []
-            for _ in range(self.num_perturbations):
-                sentence_as_tokens = tokens[:]
-                perturbed_tokens = []
-                perturbed_indices = []
-
-                for _ in range(num_ngrams):
-                    start_idx = random.randint(0, total_tokens - self.n_gram_length)
-                    perturbed_indices.extend(range(start_idx, start_idx + self.n_gram_length))
-
-                perturbed_indices = sorted(set(perturbed_indices))
-
-                for idx in perturbed_indices:
-                    old_token = sentence_as_tokens[idx]
-                    new_token = random.choice(list(vocab.keys()))
-                    sentence_as_tokens[idx] = new_token
-                    perturbed_tokens.append(old_token)
-
-                perturbed_part_of_input = ' '.join(perturbed_tokens)
-                input_after_perturbation = ' '.join(sentence_as_tokens)
-                batch_perturbed.append((original_input, input_after_perturbation, perturbed_part_of_input, original_label))
-            
-            perturbed_data.append(batch_perturbed)
-
-        return perturbed_data
-
-    def _prepare_ate_data(self):
-        train_loader = self.get_train_dataloader(batch_size=32)
-        vocab = self.get_vocab()
+    def _score_perturbations(self, all_perturbations, batch_size=32):
+        print("Scoring perturbations...")
         ate_data = []
-
         self.model.eval()
         self.model.to(self.device)
 
         with torch.no_grad():
-            for batch in tqdm(train_loader, desc="Preparing ATE data"):
-                perturbed_batches = self._perturb_batch(batch, vocab)
+            for i in tqdm(range(0, len(all_perturbations), batch_size), desc="Scoring perturbations"):
+                batch = all_perturbations[i:i+batch_size]
+                original_inputs = [item[0] for item in batch]
+                perturbed_inputs = [item[1] for item in batch]
                 
-                for perturbed_batch in perturbed_batches:
-                    original_inputs = [item[0] for item in perturbed_batch]
-                    perturbed_inputs = [item[1] for item in perturbed_batch]
-                    
-                    original_encodings = self.tokenizer(original_inputs, truncation=True, padding=True, return_tensors="pt")
-                    perturbed_encodings = self.tokenizer(perturbed_inputs, truncation=True, padding=True, return_tensors="pt")
-                    
-                    original_scores = self.model(**{k: v.to(self.device) for k, v in original_encodings.items()}).logits
-                    perturbed_scores = self.model(**{k: v.to(self.device) for k, v in perturbed_encodings.items()}).logits
-                    
-                    score_differences = torch.abs(original_scores - perturbed_scores)
-                    max_changes = torch.max(score_differences, dim=1)[0]
-                    
-                    for (_, _, perturbed_part, original_label), max_change in zip(perturbed_batch, max_changes):
-                        if max_change >= self.change_threshold:
-                            ate_data.append((perturbed_part, original_label))
+                original_encodings = self.tokenizer(original_inputs, truncation=True, padding=True, return_tensors="pt")
+                perturbed_encodings = self.tokenizer(perturbed_inputs, truncation=True, padding=True, return_tensors="pt")
+                
+                original_scores = self.model(**{k: v.to(self.device) for k, v in original_encodings.items()})
+                perturbed_scores = self.model(**{k: v.to(self.device) for k, v in perturbed_encodings.items()})
+                
+                if hasattr(original_scores, 'logits'):
+                    original_scores = original_scores.logits
+                    perturbed_scores = perturbed_scores.logits
+                
+                score_differences = torch.abs(original_scores - perturbed_scores)
+                max_changes = torch.max(score_differences, dim=1)[0]
+                
+                for (_, _, perturbed_part, label), max_change in zip(batch, max_changes):
+                    if max_change >= self.change_threshold:
+                        ate_data.append((perturbed_part, label))
 
-        self.ate_train_data = ate_data
+        print(f"Generated {len(ate_data)} ATE training samples.")
+        return ate_data
+
+    def _prepare_ate_data(self, batch_size=32):
+        perturbations_dir = f'saved/imdb_perturbations_{self.num_perturbations}_{self.perturbation_rate}'
+        perturbations_file = os.path.join(perturbations_dir, 'perturbations.pkl')
+        ate_data_file = os.path.join(perturbations_dir, 'ate_data.pkl')
+
+        if os.path.exists(ate_data_file):
+            print(f"Loading pre-computed ATE data from {ate_data_file}")
+            with open(ate_data_file, 'rb') as f:
+                self.ate_train_data = pickle.load(f)
+        else:
+            if os.path.exists(perturbations_file):
+                print(f"Loading pre-computed perturbations from {perturbations_file}")
+                with open(perturbations_file, 'rb') as f:
+                    all_perturbations = pickle.load(f)
+            else:
+                all_perturbations = self._generate_perturbations()
+                os.makedirs(perturbations_dir, exist_ok=True)
+                with open(perturbations_file, 'wb') as f:
+                    pickle.dump(all_perturbations, f)
+
+            self.ate_train_data = self._score_perturbations(all_perturbations, batch_size)
+            
+            with open(ate_data_file, 'wb') as f:
+                pickle.dump(self.ate_train_data, f)
 
     def get_ate_train_dataloader(self, batch_size=32):
         if self.ate_train_data is None:
-            self._prepare_ate_data()
-        
-        def collate_fn(batch):
-            texts, labels = zip(*batch)
-            encodings = self.tokenizer(list(texts), truncation=True, padding=True, return_tensors="pt")
-            return {
-                'input_ids': encodings['input_ids'],
-                'attention_mask': encodings['attention_mask'],
-                'labels': torch.tensor(labels, dtype=torch.long)
-            }
+            raise ValueError("ATE data has not been prepared. Call prepare_data() first.")
         
         dataset = SimpleDataset(self.ate_train_data, self.tokenizer)
-        return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=self.collate_fn)
 
-    def get_dataloaders(self, tokenizer, batch_size):
+    def get_dataloaders(self, batch_size):
         return self.get_ate_train_dataloader(batch_size), self.get_val_dataloader(batch_size)
+    
+    def get_full_train_dataloader(self, batch_size=32):
+        if self.ate_train_data is None:
+            raise ValueError("ATE data has not been prepared. Call prepare_data() first.")
+        
+        # Combine train and validation data
+        full_train_data = self.ate_train_data + [
+            (text, label) for text, label in self.preprocess()[len(self.train_dataset):]
+        ]
+        
+        dataset = SimpleDataset(full_train_data, self.tokenizer)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=self.collate_fn)

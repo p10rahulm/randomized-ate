@@ -3,11 +3,11 @@ from pathlib import Path
 import sys
 import csv
 from datetime import datetime
+import argparse
+import logging
 
 # Add project root to system path
-project_root = Path(__file__).resolve().parent
-while not (project_root / '.git').exists() and project_root != project_root.parent:
-    project_root = project_root.parent
+project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from models.model_variations import model_variations
@@ -16,20 +16,54 @@ from data_loaders.imdb_ate import ATEDataModule
 from trainers.trainer import Trainer
 from testers.tester import Tester
 from optimizers.optimizer_params import optimizer_configs
+from utilities.model_utilities import save_trained_model, load_trained_model
+from typing import List, Dict, Any
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-def run_imdb_sentiment_experiment():
+def run_experiment(model: Any, trainer: Trainer, tester: Tester, num_epochs: int, writer: csv.DictWriter, csvfile,
+                   model_type: str, model_name: str, learning_rate: float, run_training: bool = True, 
+                   run_testing: bool = True) -> None:
+    training_history = [-1]
+    model_path = ""
+    if run_training:
+        training_history = trainer.train_on_full_dataset(num_epochs=num_epochs)
+        model_path = save_trained_model(model, 'sentiment_imdb', model_name, f"{model_type}_e{num_epochs}_lr{learning_rate}")
+
+    if run_testing:
+        test_loss, test_accuracy, test_precision, test_recall, test_f1 = tester.test()
+
+        writer.writerow({
+            'model': model_name,
+            'type': model_type,
+            'epochs': num_epochs,
+            'final_train_loss': training_history[-1],
+            'test_loss': test_loss,
+            'test_accuracy': test_accuracy,
+            'test_precision': test_precision,
+            'test_recall': test_recall,
+            'test_f1': test_f1,
+            'model_path': model_path
+        })
+        csvfile.flush()
+
+
+def run_imdb_sentiment_experiment(args):
     # Experiment parameters
-    models = ["roberta", "bert", "albert", "distilbert", "electra_small_discriminator"]
-    classification_word = "Sentiment"
-    epochs = [5, 10, 20]
-    batch_size = 1024
-    patience = 3
+    models = args.models
+    epochs = args.epochs
+    batch_size = args.batch_size
+    patience = args.patience
+    classification_word = args.classification_word or "Sentiment"
+    preload_model = args.preload_model or False
+    print(f"preload_model={preload_model}")
+    
 
     # Hyperparameters
-    optimizer_name = "adamw"
-    hidden_layer = "1_hidden"
-    learning_rate = 0.0001
+    optimizer_name = args.optimizer
+    hidden_layer = args.hidden_layer
+    learning_rate = args.learning_rate
 
     # Prepare data loader
     data_module = IMDBDataModule(classification_word)
@@ -41,16 +75,32 @@ def run_imdb_sentiment_experiment():
     results_file = os.path.join(results_dir, f"results_{timestamp}.csv")
 
     with open(results_file, 'w', newline='') as csvfile:
-        fieldnames = ['model', 'type', 'epochs', 'final_train_loss', 'test_loss', 'test_accuracy', 'test_precision', 'test_recall', 'test_f1']
+        fieldnames = ['model', 'type', 'epochs', 'final_train_loss', 'test_loss', 'test_accuracy', 'test_precision', 'test_recall', 'test_f1', 'model_path']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         for model_name in models:
             for num_epochs in epochs:
-                print(f"Running experiment: {model_name}, epochs={num_epochs}")
+                logging.info(f"Running experiment: {model_name}, epochs={num_epochs}")
 
+                
                 # Create base model
-                base_model = model_variations[model_name][hidden_layer](classification_word, freeze_encoder=True)
+                model_preloaded_flag = False
+                if preload_model:
+                    try:
+                        base_model = load_trained_model(model_variations[model_name][hidden_layer], 'sentiment_imdb', model_name, 
+                                                        classification_word=classification_word, freeze_encoder=True)
+                        if base_model is not None:
+                            logging.info(f"Loaded pre-trained model for {model_name}. Skipping training.")
+                            model_preloaded_flag = True
+                        else:
+                            logging.info(f"No pre-trained model found for {model_name}. Training from scratch.")                            
+                    except Exception as e:
+                        logging.error(f"Error loading pre-trained model for {model_name}: {str(e)}. Training from scratch.")
+                        
+
+                if not model_preloaded_flag:
+                    base_model = model_variations[model_name][hidden_layer](classification_word, freeze_encoder=True)
 
                 # Update optimizer config
                 optimizer_config = optimizer_configs[optimizer_name].copy()
@@ -58,77 +108,73 @@ def run_imdb_sentiment_experiment():
                 optimizer_config['params']['lr'] = learning_rate
 
                 # Create trainer for base model
-                trainer = Trainer(base_model, data_module, optimizer_name=optimizer_name,
+                base_trainer = Trainer(base_model, data_module, optimizer_name=optimizer_name,
                                   optimizer_params=optimizer_config['params'],
                                   batch_size=batch_size, num_epochs=num_epochs, patience=patience)
+                
 
-                # Train on full dataset
-                training_history = trainer.train_on_full_dataset(num_epochs=num_epochs)
+                base_tester = Tester(base_model, data_module, batch_size=batch_size)
 
-                # Test the base model
-                tester = Tester(base_model, data_module, batch_size=batch_size)
-                test_loss, test_accuracy, test_precision, test_recall, test_f1 = tester.test()
-
-                # Write base model results
-                writer.writerow({
-                    'model': model_name,
-                    'type': 'base',
-                    'epochs': num_epochs,
-                    'final_train_loss': training_history[-1],
-                    'test_loss': test_loss,
-                    'test_accuracy': test_accuracy,
-                    'test_precision': test_precision,
-                    'test_recall': test_recall,
-                    'test_f1': test_f1
-                })
-                csvfile.flush()
-
+                # Run experiment for base model
+                run_experiment(base_model, base_trainer, base_tester, num_epochs, writer, csvfile, 'base', model_name, learning_rate, run_training=not model_preloaded_flag, run_testing=False)
+                
                 # PART 2: ATE BASED MODEL
 
                 # Create ATE model
                 ate_model = model_variations[model_name][hidden_layer](classification_word, freeze_encoder=True)
 
                 # Create New ATE Data
+                # try:
                 ate_data_module = ATEDataModule(
                     classification_word=classification_word,
                     model=base_model,
-                    perturbation_rate=0.5,
-                    num_perturbations=25,
-                    n_gram_length=5,
-                    change_threshold=0.5
+                    perturbation_rate=args.perturbation_rate,
+                    num_perturbations=args.num_perturbations,
+                    n_gram_length=args.n_gram_length,
+                    change_threshold=args.change_threshold
                 )
-                
+
                 # Prepare perturbed data
-                ate_data_module.prepare_data()
+                ate_data_module.prepare_data(batch_size=args.ate_batch_size)
+                # except Exception as e:
+                #     logging.error(f"Error preparing ATE data: {str(e)}. Skipping ATE experiment for this model.")
+                #     continue
+                
+                
 
                 # Create trainer for ATE model
                 ate_trainer = Trainer(ate_model, ate_data_module, optimizer_name=optimizer_name,
                                       optimizer_params=optimizer_config['params'],
                                       batch_size=batch_size, num_epochs=num_epochs, patience=patience)
 
-                # Train ATE model
-                ate_training_history = ate_trainer.train_on_full_dataset(num_epochs=num_epochs)
-
                 # Test the ATE model
                 ate_tester = Tester(ate_model, data_module, batch_size=batch_size)
-                ate_test_loss, ate_test_accuracy, ate_test_precision, ate_test_recall, ate_test_f1 = ate_tester.test()
-
-                # Write ATE model results
-                writer.writerow({
-                    'model': model_name,
-                    'type': 'ate',
-                    'epochs': num_epochs,
-                    'final_train_loss': ate_training_history[-1],
-                    'test_loss': ate_test_loss,
-                    'test_accuracy': ate_test_accuracy,
-                    'test_precision': ate_test_precision,
-                    'test_recall': ate_test_recall,
-                    'test_f1': ate_test_f1
-                })
-                csvfile.flush()
+                
+                run_experiment(ate_model, ate_trainer, ate_tester, num_epochs, writer, csvfile, 
+                               'ate', model_name, learning_rate, run_training=True, run_testing=True)
+                
 
         print(f"Experiments completed. Results saved to {results_file}")
 
 if __name__ == "__main__":
-    run_imdb_sentiment_experiment()
-    
+    parser = argparse.ArgumentParser(description="Run IMDB Sentiment Experiment")
+    parser.add_argument("--models", nargs="+", default=["roberta", "albert", "distilbert", "bert", "electra_small_discriminator", "t5"],
+                        help="List of models to run experiments on")
+    parser.add_argument("--epochs", nargs="+", type=int, default=[1, 5, 10, 20],
+                        help="List of epoch numbers to run experiments with")
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
+    parser.add_argument("--patience", type=int, default=3, help="Patience for early stopping")
+    parser.add_argument("--optimizer", default="adamw", help="Optimizer to use")
+    parser.add_argument("--hidden_layer", default="1_hidden", help="Hidden layer configuration")
+    parser.add_argument("--learning_rate", type=float, default=0.0005, help="Learning rate")
+    parser.add_argument("--perturbation_rate", type=float, default=0.5, help="Perturbation rate for ATE")
+    parser.add_argument("--num_perturbations", type=int, default=100, help="Number of perturbations for ATE")
+    parser.add_argument("--n_gram_length", type=int, default=5, help="N-gram length for ATE")
+    parser.add_argument("--change_threshold", type=float, default=0.5, help="Change threshold for ATE")
+    parser.add_argument("--ate_batch_size", type=int, default=256, help="Batch size for ATE data preparation")
+    parser.add_argument("--preload_model", action="store_true", help="Load the latest trained model instead of training from scratch")
+    parser.add_argument("--classification_word", default="Sentiment", help="Classification word")
+
+
+    args = parser.parse_args()
+    run_imdb_sentiment_experiment(args)

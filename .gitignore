@@ -3,6 +3,16 @@
 
 trained_models/*
 logs/*
+saved/*.pkl
+
+env/
+myenv/
+venv/
+.venv/
+.myenv/
+.env/
+
+
 
 outputs/gao_unmasked.csv
 outputs/zampieri_masked.csv

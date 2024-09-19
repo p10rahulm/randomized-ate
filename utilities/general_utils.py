@@ -65,3 +65,17 @@ def load_tokenized_loader_with_length(filepath, batch_size=64):
                 perturbed_part_batch, perturbed_part_lengths)
 
     return DataLoader(all_data, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+
+def get_project_root():
+    """
+    Find the project root by searching for a marker file or directory.
+    This could be a .git directory, a specific config file, or any other
+    file/directory that marks the root of your project.
+    """
+    current_path = os.path.abspath(__file__)
+    while current_path != '/':
+        if os.path.exists(os.path.join(current_path, '.git')):
+            return current_path
+        current_path = os.path.dirname(current_path)
+    raise FileNotFoundError("Could not find project root. Make sure .git directory exists.")

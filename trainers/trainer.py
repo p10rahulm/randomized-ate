@@ -18,7 +18,7 @@ from tqdm import tqdm
 from optimizers.optimizer_params import get_optimizer_config
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
-from utilities import get_project_root
+from utilities.general_utils import get_project_root
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from typing import Dict, Any, Tuple, List, Union
 import logging
@@ -42,6 +42,9 @@ class Trainer:
 
         self.dataset_name = dataset_name
         self.num_hidden_layers = self.model.num_hidden_layers
+        
+        # Set up tokenizer for data module
+        self.data_module.setup(self.model.tokenizer)
 
         # Set up optimizer
         optimizer_config = get_optimizer_config(optimizer_name)
@@ -55,6 +58,7 @@ class Trainer:
         self.loss_fn = nn.CrossEntropyLoss()
         self.val_loader = None
         self.train_loader = None
+        
 
         # Set up logging
         logging.basicConfig(level=logging.INFO)
@@ -180,7 +184,7 @@ class Trainer:
         Returns:
         List[float]: List of average losses for each epoch.
         """
-        full_train_loader = self.data_module.get_full_train_dataloader(self.model.tokenizer, self.batch_size)
+        full_train_loader = self.data_module.get_full_train_dataloader(self.batch_size)
         epoch_losses = []
 
         for epoch in range(num_epochs):

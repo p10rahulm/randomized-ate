@@ -66,14 +66,13 @@ class IMDBDataModule(BaseDataModule):
         full_train = torch.utils.data.ConcatDataset([self.train_dataset, self.val_dataset])
         return self.get_dataloader(full_train, batch_size, shuffle=True)
 
-    def get_dataloaders(self, tokenizer, batch_size):
-        self.setup(tokenizer)
+    def get_dataloaders(self, batch_size):
         return self.get_train_dataloader(batch_size), self.get_val_dataloader(batch_size)
+
+    def get_class_names(self):
+        return ["negative", "positive"]
 
     def preprocess(self):
         train_data = [(item['text'], item['label']) for item in self.train_dataset.dataset]
         val_data = [(item['text'], item['label']) for item in self.val_dataset.dataset]
         return train_data + val_data
-
-    def get_class_names(self):
-        return ["negative", "positive"]

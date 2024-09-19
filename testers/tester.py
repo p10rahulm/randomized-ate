@@ -22,7 +22,7 @@ class Tester:
         all_labels = []
 
         # Get the test dataloader
-        test_loader = self.data_module.get_test_dataloader(self.model.tokenizer, self.batch_size)
+        test_loader = self.data_module.get_test_dataloader(self.batch_size)
 
         progress_bar = tqdm(test_loader, desc="Testing")
         with torch.no_grad():
