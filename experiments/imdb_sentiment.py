@@ -116,7 +116,7 @@ def run_imdb_sentiment_experiment(args):
                 base_tester = Tester(base_model, data_module, batch_size=batch_size)
 
                 # Run experiment for base model
-                run_experiment(base_model, base_trainer, base_tester, num_epochs, writer, csvfile, 'base', model_name, learning_rate, run_training=not model_preloaded_flag, run_testing=False)
+                run_experiment(base_model, base_trainer, base_tester, num_epochs, writer, csvfile, 'base', model_name, learning_rate, run_training=not model_preloaded_flag, run_testing=True)
                 
                 # PART 2: ATE BASED MODEL
 
@@ -158,7 +158,7 @@ def run_imdb_sentiment_experiment(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run IMDB Sentiment Experiment")
-    parser.add_argument("--models", nargs="+", default=["roberta", "albert", "distilbert", "bert", "electra_small_discriminator", "t5"],
+    parser.add_argument("--models", nargs="+", default=["roberta", "albert", "distilbert", "bert", "deberta_small", "t5"],
                         help="List of models to run experiments on")
     parser.add_argument("--epochs", nargs="+", type=int, default=[1, 5, 10, 20],
                         help="List of epoch numbers to run experiments with")

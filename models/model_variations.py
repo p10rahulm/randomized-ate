@@ -4,7 +4,7 @@ from transformers import T5EncoderModel, T5Tokenizer
 from models.model_template import create_model
 import torch
 import torch.nn as nn
-# from models.t5_for_classification import T5ForClassification
+from models.t5_for_classification import T5ForClassification
 
 
 def create_model_with_device(model_name, classification_word, hidden_layers, freeze_encoder=True):
@@ -43,6 +43,9 @@ def create_t5_model(classification_word, hidden_layers, freeze_encoder=True, mod
         print("Please install SentencePiece by running: pip install sentencepiece")
         return None  # or return a default model
 
+# def create_t5_model(classification_word, hidden_layers, freeze_encoder=True, model_name="t5-base"):
+#     return create_model_with_device("t5-small", classification_word, hidden_layers, freeze_encoder)
+    
 
 def create_deberta_small_model(classification_word, hidden_layers, freeze_encoder=True):
     return create_model_with_device("microsoft/deberta-v3-small", classification_word, hidden_layers, freeze_encoder)

@@ -11,6 +11,7 @@ from utilities.word_utils import load_spacy_model
 import os
 import pickle
 from utilities.word_utils import extract_phrases, remove_punctuation_phrases
+from inspect import signature  # Import the inspect module
 
 
 class ATEDataModule(IMDBDataModule):
@@ -81,6 +82,10 @@ class ATEDataModule(IMDBDataModule):
         ate_data = []
         self.model.eval()
         self.model.to(self.device)
+        
+        # Retrieve the argument names of the model's forward method using the inspect module
+        model_forward_signature = signature(self.model.forward)
+        model_forward_arg_names = model_forward_signature.parameters.keys()
 
         with torch.no_grad():
             for i in tqdm(range(0, len(all_perturbations), batch_size), desc="Scoring perturbations"):
@@ -90,9 +95,17 @@ class ATEDataModule(IMDBDataModule):
                 
                 original_encodings = self.tokenizer(original_inputs, truncation=True, padding=True, return_tensors="pt")
                 perturbed_encodings = self.tokenizer(perturbed_inputs, truncation=True, padding=True, return_tensors="pt")
-                
-                original_scores = self.model(**{k: v.to(self.device) for k, v in original_encodings.items()})
-                perturbed_scores = self.model(**{k: v.to(self.device) for k, v in perturbed_encodings.items()})
+
+                # Filter tokenizer outputs to include only the arguments accepted by the model's forward method
+                # This prevents passing unexpected arguments like 'token_type_ids' to models that don't use them
+                inputs = {k: v.to(self.device) for k, v in original_encodings.items() if k in model_forward_arg_names}
+                original_scores = self.model(**inputs)
+
+                inputs = {k: v.to(self.device) for k, v in perturbed_encodings.items() if k in model_forward_arg_names}
+                perturbed_scores = self.model(**inputs)
+                              
+                # original_scores = self.model(**{k: v.to(self.device) for k, v in original_encodings.items()})
+                # perturbed_scores = self.model(**{k: v.to(self.device) for k, v in perturbed_encodings.items()})
                 
                 if hasattr(original_scores, 'logits'):
                     original_scores = original_scores.logits
