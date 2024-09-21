@@ -1,1 +1,4 @@
 model,type,epochs,final_train_loss,test_loss,test_accuracy,test_precision,test_recall,test_f1,model_path
+albert,base,1,0.37301624262211275,0.2922344809892226,0.87684,0.8790525143642436,0.87684,0.8766600173637379,trained_models/sentiment_imdb/albert/20240919_185742_base_e1_lr0.0005.pth
+
+.pth

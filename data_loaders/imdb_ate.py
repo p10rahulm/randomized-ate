@@ -12,10 +12,14 @@ import os
 import pickle
 from utilities.word_utils import extract_phrases, remove_punctuation_phrases
 from inspect import signature  # Import the inspect module
+from typing import Dict, Any
+
 
 
 class ATEDataModule(IMDBDataModule):
-    def __init__(self, classification_word, model, perturbation_rate=0.5, num_perturbations=50, n_gram_length=5, change_threshold=0.5):
+    def __init__(self, classification_word: str, model: Any, model_config: Dict[str, Any], 
+                 perturbation_rate: float = 0.5, num_perturbations: int = 25, 
+                 n_gram_length: int = 5, change_threshold: float = 0.5):
         super().__init__(classification_word)
         self.model = model
         self.perturbation_rate = perturbation_rate
@@ -27,6 +31,8 @@ class ATEDataModule(IMDBDataModule):
         self.tokenizer = model.tokenizer
         self.nlp = load_spacy_model("en_core_web_sm")
         self.vocab = list(self.tokenizer.get_vocab().keys())
+        self.model_config = model_config  # Should contain 'model_name', 'num_epochs', and 'learning_rate'
+        
 
     
     def perturb_text(self, text):
@@ -121,14 +127,21 @@ class ATEDataModule(IMDBDataModule):
         print(f"Generated {len(ate_data)} ATE training samples.")
         return ate_data
 
-    def _prepare_ate_data(self, batch_size=32):
+    def _prepare_ate_data(self, batch_size: int = 32) -> None:
+        model_name = self.model_config['model_name']
+        num_epochs = self.model_config['num_epochs']
+        learning_rate = self.model_config['learning_rate']
+
         perturbations_dir = f'saved/imdb_perturbations_{self.num_perturbations}_{self.perturbation_rate}'
         perturbations_file = os.path.join(perturbations_dir, 'perturbations.pkl')
-        ate_data_file = os.path.join(perturbations_dir, 'ate_data.pkl')
+        
+        ate_dir = f'saved/imdb_ate_{self.num_perturbations}_{self.perturbation_rate}'
+        os.makedirs(ate_dir, exist_ok=True)
+        ate_file = os.path.join(ate_dir, f'{model_name}_base_e{num_epochs}_lr{learning_rate}.pkl')
 
-        if os.path.exists(ate_data_file):
-            print(f"Loading pre-computed ATE data from {ate_data_file}")
-            with open(ate_data_file, 'rb') as f:
+        if os.path.exists(ate_file):
+            print(f"Loading pre-computed ATE data from {ate_file}")
+            with open(ate_file, 'rb') as f:
                 self.ate_train_data = pickle.load(f)
         else:
             if os.path.exists(perturbations_file):
@@ -143,7 +156,7 @@ class ATEDataModule(IMDBDataModule):
 
             self.ate_train_data = self._score_perturbations(all_perturbations, batch_size)
             
-            with open(ate_data_file, 'wb') as f:
+            with open(ate_file, 'wb') as f:
                 pickle.dump(self.ate_train_data, f)
 
     def get_ate_train_dataloader(self, batch_size=32):
@@ -151,11 +164,17 @@ class ATEDataModule(IMDBDataModule):
             raise ValueError("ATE data has not been prepared. Call prepare_data() first.")
         
         dataset = SimpleDataset(self.ate_train_data, self.tokenizer)
-        return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=self.collate_fn)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=self.ate_collate_fn)
 
     def get_dataloaders(self, batch_size):
         return self.get_ate_train_dataloader(batch_size), self.get_val_dataloader(batch_size)
     
+    def ate_collate_fn(self, batch):
+        input_ids = torch.stack([item['input_ids'] for item in batch])
+        attention_masks = torch.stack([item['attention_mask'] for item in batch])
+        labels = torch.stack([item['label'] for item in batch])
+        return input_ids, attention_masks, labels
+   
     def get_full_train_dataloader(self, batch_size=32):
         if self.ate_train_data is None:
             raise ValueError("ATE data has not been prepared. Call prepare_data() first.")
@@ -166,4 +185,4 @@ class ATEDataModule(IMDBDataModule):
         ]
         
         dataset = SimpleDataset(full_train_data, self.tokenizer)
-        return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=self.collate_fn)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=self.ate_collate_fn)

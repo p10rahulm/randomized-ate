@@ -8,4 +8,4 @@ nohup python experiments/imdb_sentiment.py --models distilbert t5  > logs/imdb_s
 
 # nohup python experiments/imdb_sentiment.py --models deberta_small  > logs/imdb_sentiment/deberta_small_lr0.005_pr0.5_np_100_ct0.5_batch256_$(date +"%Y-%m-%d-%H-%M-%S").txt 2>&1 &
 
-nohup python experiments/imdb_sentiment.py --models bert  > logs/imdb_sentiment/bert_lr0.005_pr0.5_np_100_ct0.5_batch256_$(date +"%Y-%m-%d-%H-%M-%S").txt 2>&1 &
+nohup python experiments/imdb_sentiment.py --preload_model --models bert > logs/imdb_sentiment/bert_lr0.005_pr0.5_np_100_ct0.5_batch256_$(date +"%Y-%m-%d-%H-%M-%S").txt 2>&1 &

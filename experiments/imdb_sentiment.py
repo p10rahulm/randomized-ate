@@ -29,7 +29,8 @@ def run_experiment(model: Any, trainer: Trainer, tester: Tester, num_epochs: int
     model_path = ""
     if run_training:
         training_history = trainer.train_on_full_dataset(num_epochs=num_epochs)
-        model_path = save_trained_model(model, 'sentiment_imdb', model_name, f"{model_type}_e{num_epochs}_lr{learning_rate}")
+        model_dir = f"{model_name}_{model_type}_e{num_epochs}_lr{learning_rate}"
+        model_path = save_trained_model(model, 'sentiment_imdb', model_dir, f"{model_type}")
 
     if run_testing:
         test_loss, test_accuracy, test_precision, test_recall, test_f1 = tester.test()
@@ -88,7 +89,8 @@ def run_imdb_sentiment_experiment(args):
                 model_preloaded_flag = False
                 if preload_model:
                     try:
-                        base_model = load_trained_model(model_variations[model_name][hidden_layer], 'sentiment_imdb', model_name, 
+                        base_model_dir = f"{model_name}_base_e{num_epochs}_lr{learning_rate}"
+                        base_model = load_trained_model(model_variations[model_name][hidden_layer], 'sentiment_imdb', base_model_dir,
                                                         classification_word=classification_word, freeze_encoder=True)
                         if base_model is not None:
                             logging.info(f"Loaded pre-trained model for {model_name}. Skipping training.")
@@ -116,31 +118,33 @@ def run_imdb_sentiment_experiment(args):
                 base_tester = Tester(base_model, data_module, batch_size=batch_size)
 
                 # Run experiment for base model
-                run_experiment(base_model, base_trainer, base_tester, num_epochs, writer, csvfile, 'base', model_name, learning_rate, run_training=not model_preloaded_flag, run_testing=True)
+                run_experiment(base_model, base_trainer, base_tester, num_epochs, writer, csvfile, 'base', 
+                               model_name, learning_rate, run_training=not model_preloaded_flag, run_testing=True)
                 
                 # PART 2: ATE BASED MODEL
 
                 # Create ATE model
                 ate_model = model_variations[model_name][hidden_layer](classification_word, freeze_encoder=True)
-
                 # Create New ATE Data
-                # try:
+                model_config = {
+                    'model_name': model_name,
+                    'num_epochs': num_epochs,
+                    'learning_rate': learning_rate
+                }
+                
+                # Create New ATE Data
                 ate_data_module = ATEDataModule(
-                    classification_word=classification_word,
+                    classification_word=args.classification_word,
                     model=base_model,
+                    model_config=model_config,
                     perturbation_rate=args.perturbation_rate,
                     num_perturbations=args.num_perturbations,
                     n_gram_length=args.n_gram_length,
                     change_threshold=args.change_threshold
                 )
-
+                
                 # Prepare perturbed data
                 ate_data_module.prepare_data(batch_size=args.ate_batch_size)
-                # except Exception as e:
-                #     logging.error(f"Error preparing ATE data: {str(e)}. Skipping ATE experiment for this model.")
-                #     continue
-                
-                
 
                 # Create trainer for ATE model
                 ate_trainer = Trainer(ate_model, ate_data_module, optimizer_name=optimizer_name,
@@ -160,7 +164,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run IMDB Sentiment Experiment")
     parser.add_argument("--models", nargs="+", default=["roberta", "albert", "distilbert", "bert", "deberta_small", "t5"],
                         help="List of models to run experiments on")
-    parser.add_argument("--epochs", nargs="+", type=int, default=[1, 5, 10, 20],
+    parser.add_argument("--epochs", nargs="+", type=int, default=[1,],
                         help="List of epoch numbers to run experiments with")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--patience", type=int, default=3, help="Patience for early stopping")

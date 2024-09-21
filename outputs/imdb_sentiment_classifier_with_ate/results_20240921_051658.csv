@@ -1,0 +1,2 @@
+model,type,epochs,final_train_loss,test_loss,test_accuracy,test_precision,test_recall,test_f1,model_path
+electra_small_discriminator,base,1,0.6195616472740563,0.552883505821228,0.72156,0.7254647243566542,0.72156,0.7203492127655583,trained_models/sentiment_imdb/electra_small_discriminator_e1_lr0.0005/20240921_051932_base.pth

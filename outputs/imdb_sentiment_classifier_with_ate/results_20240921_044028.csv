@@ -1,1 +1,2 @@
 model,type,epochs,final_train_loss,test_loss,test_accuracy,test_precision,test_recall,test_f1,model_path
+roberta,base,1,-1,0.5350571676176421,0.83612,0.8418836195642831,0.83612,0.8354263869973679,

@@ -1,1 +1,2 @@
 model,type,epochs,final_train_loss,test_loss,test_accuracy,test_precision,test_recall,test_f1,model_path
+distilbert,base,1,-1,0.3847475387916273,0.82712,0.8367516267055395,0.82712,0.8258749372658261,

@@ -1,0 +1,2 @@
+model,type,epochs,final_train_loss,test_loss,test_accuracy,test_precision,test_recall,test_f1,model_path
+albert,base,1,-1,0.2922344809892226,0.87684,0.8790525143642436,0.87684,0.8766600173637379,
