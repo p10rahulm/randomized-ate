@@ -63,7 +63,7 @@ This repository is organized as follows:
     - `mask_and_replace.py`: To compute the ATE scores, we need replacement words for each word. These are generated
       using an MLM model like **roberta_base**
     - `utilities.py`: Several utility functions called by across the codebase.
-    - `word_utils.py`: Several NLP utility functions called by across the codebase.
+    - `utilities/basic_word_utils.py`: Several NLP utility functions called by across the codebase.
 - `compute_ate_scores_multiple_classifiers.py`: Computes the ATE scores for multiple models like LogisticRegression,
   SVM, GradientBoost and NaiveBayes
 - `outputs/`: Output files generated during ATE Computation.

@@ -9,7 +9,7 @@ from keras_preprocessing.sequence import pad_sequences
 import torch
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, TensorDataset
 
-from word_utils import normalizeSentence
+from utilities.basic_word_utils import normalizeSentence
 from tqdm import tqdm
 
 from transformers import (

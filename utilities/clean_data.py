@@ -4,7 +4,7 @@ import time
 import csv, re, emoji, time, pandas as pd, numpy as np
 from collections import defaultdict
 from tokenizers.normalizers import NFD, StripAccents, Strip, Lowercase
-from word_utils import normalizeSentence, read_data_csv, read_text
+from utilities.basic_word_utils import normalizeSentence, read_data_csv, read_text
 from keras_preprocessing.sequence import pad_sequences
 # from getHatebertScores import getHBScores, getListOfModelConfigs
 

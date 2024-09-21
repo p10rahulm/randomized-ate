@@ -1,4 +1,0 @@
-model,type,epochs,final_train_loss,test_loss,test_accuracy,test_precision,test_recall,test_f1,model_path
-distilbert,ate,1,0.3636763270827448,0.31569334651742664,0.8666,0.8668859973207017,0.8666,0.8665739977271953,trained_models/sentiment_imdb/distilbert/20240921_000057_ate_e1_lr0.0005.pth
-distilbert,ate,5,0.2817884806705558,0.39180397105460263,0.82504,0.8253281293302351,0.82504,0.8250012527573786,trained_models/sentiment_imdb/distilbert/20240921_001108_ate_e5_lr0.0005.pth
-distilbert,ate,10,0.2500390993512195,0.39513355919293,0.8184,0.832821343723728,0.8184,0.8164112479662005,trained_models/sentiment_imdb/distilbert/20240921_002556_ate_e10_lr0.0005.pth
