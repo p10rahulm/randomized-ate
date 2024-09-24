@@ -164,7 +164,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run IMDB Sentiment Experiment")
     parser.add_argument("--models", nargs="+", default=["roberta", "albert", "distilbert", "bert", "deberta_small", "t5"],
                         help="List of models to run experiments on")
-    parser.add_argument("--epochs", nargs="+", type=int, default=[1,],
+    parser.add_argument("--epochs", nargs="+", type=int, default=[1,2,5],
                         help="List of epoch numbers to run experiments with")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--patience", type=int, default=3, help="Patience for early stopping")
@@ -172,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_layer", default="1_hidden", help="Hidden layer configuration")
     parser.add_argument("--learning_rate", type=float, default=0.0005, help="Learning rate")
     parser.add_argument("--perturbation_rate", type=float, default=0.5, help="Perturbation rate for ATE")
-    parser.add_argument("--num_perturbations", type=int, default=100, help="Number of perturbations for ATE")
+    parser.add_argument("--num_perturbations", type=int, default=25, help="Number of perturbations for ATE")
     parser.add_argument("--n_gram_length", type=int, default=5, help="N-gram length for ATE")
     parser.add_argument("--change_threshold", type=float, default=0.5, help="Change threshold for ATE")
     parser.add_argument("--ate_batch_size", type=int, default=256, help="Batch size for ATE data preparation")
